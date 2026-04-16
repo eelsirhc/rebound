@@ -196,10 +196,14 @@ void close_orbit_hdf5(void)
     H5Fclose(orbit_file_id);
 }
 
-/* Append one row per particle to the orbital-elements HDF5 dataset. */
+/* Append one row per eligible particle to the orbital-elements HDF5 dataset.
+ * Planets and comet (ap == NULL) are always written.
+ * Dust particles (ap != NULL) are only written once r->t >= min_output_time. */
 void output_orbital_elements(struct reb_simulation *r)
 {
     int N = r->N;
+    int include_dust = (r->t >= min_output_time);
+
     OrbElement *buf = (OrbElement *)malloc(N * sizeof(OrbElement));
     if (!buf)
     {
@@ -207,36 +211,47 @@ void output_orbital_elements(struct reb_simulation *r)
         return;
     }
 
+    int n_written = 0;
     for (int i = 0; i < N; i++)
     {
+        int is_dust = (r->particles[i].ap != NULL);
+        if (is_dust && !include_dust)
+            continue;
+
         struct reb_orbit o = reb_orbit_from_particle(r->G, r->particles[i], r->particles[0]);
-        buf[i].time = r->t;
-        buf[i].particle_id = i;
-        buf[i].a = o.a;
-        buf[i].e = o.e;
-        buf[i].inc = o.inc * 180.0 / M_PI;
-        buf[i].Omega = o.Omega * 180.0 / M_PI;
-        buf[i].omega = o.omega * 180.0 / M_PI;
-        buf[i].M = o.M * 180.0 / M_PI;
-        buf[i].x = r->particles[i].x;
-        buf[i].y = r->particles[i].y;
-        buf[i].z = r->particles[i].z;
-        buf[i].vx = r->particles[i].vx;
-        buf[i].vy = r->particles[i].vy;
-        buf[i].vz = r->particles[i].vz;
-        // Extract beta from particle.ap (0.0 for planets/comet)
-        buf[i].beta = (r->particles[i].ap != NULL) ? *((double *)r->particles[i].ap) : 0.0;
-        buf[i].birth_time = (i < MAX_PARTICLES) ? particle_birth_time[i] : 0.0;
+        buf[n_written].time = r->t;
+        buf[n_written].particle_id = i;
+        buf[n_written].a = o.a;
+        buf[n_written].e = o.e;
+        buf[n_written].inc = o.inc * 180.0 / M_PI;
+        buf[n_written].Omega = o.Omega * 180.0 / M_PI;
+        buf[n_written].omega = o.omega * 180.0 / M_PI;
+        buf[n_written].M = o.M * 180.0 / M_PI;
+        buf[n_written].x = r->particles[i].x;
+        buf[n_written].y = r->particles[i].y;
+        buf[n_written].z = r->particles[i].z;
+        buf[n_written].vx = r->particles[i].vx;
+        buf[n_written].vy = r->particles[i].vy;
+        buf[n_written].vz = r->particles[i].vz;
+        buf[n_written].beta = is_dust ? *((double *)r->particles[i].ap) : 0.0;
+        buf[n_written].birth_time = (i < MAX_PARTICLES) ? particle_birth_time[i] : 0.0;
+        n_written++;
     }
 
-    /* Extend the dataset by N rows */
-    hsize_t new_size[1] = {orbit_nrows + (hsize_t)N};
+    if (n_written == 0)
+    {
+        free(buf);
+        return;
+    }
+
+    /* Extend the dataset by n_written rows */
+    hsize_t new_size[1] = {orbit_nrows + (hsize_t)n_written};
     H5Dset_extent(orbit_dset_id, new_size);
 
     /* Re-open the (now larger) file dataspace and select the new rows */
     hid_t fspace = H5Dget_space(orbit_dset_id);
     hsize_t offset[1] = {orbit_nrows};
-    hsize_t count[1] = {(hsize_t)N};
+    hsize_t count[1] = {(hsize_t)n_written};
     H5Sselect_hyperslab(fspace, H5S_SELECT_SET, offset, NULL, count, NULL);
 
     hid_t mspace = H5Screate_simple(1, count, NULL);
@@ -246,7 +261,7 @@ void output_orbital_elements(struct reb_simulation *r)
     H5Sclose(fspace);
     H5Fflush(orbit_file_id, H5F_SCOPE_LOCAL);
 
-    orbit_nrows += (hsize_t)N;
+    orbit_nrows += (hsize_t)n_written;
     free(buf);
 }
 
@@ -582,7 +597,7 @@ void heartbeat(struct reb_simulation *r)
     {
         reb_simulation_output_timing(r, INFINITY);
     }
-    if (fmod(r->t, OUTPUT_INTERVAL) < r->dt && r->t >= min_output_time)
+    if (fmod(r->t, OUTPUT_INTERVAL) < r->dt)
     {
         // Guard against writing the same timestamp multiple times
         // Use a small epsilon for floating-point comparison
