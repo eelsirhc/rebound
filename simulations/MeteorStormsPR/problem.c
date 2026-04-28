@@ -11,13 +11,13 @@
  */
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 #include <math.h>
 #include "rebound.h"
 #include <hdf5.h>
 
 #define MAX_PARTICLES 20005
 #define NDIM 3
-#define OUTPUT_INTERVAL 30.0
 // Constants
 #define AU_IN_M 1.495978707e11 // meters
 #define C_SI 299792458.0       // m/s
@@ -27,6 +27,69 @@
 static double BETA_LIST[] = {1e-4, 3e-4, 1e-3, 3e-3, 1e-2};
 static int N_BETA = 5;
 static double EJECTION_V_SIGMA_MPS = 200.0;
+
+typedef struct
+{
+    double dt;
+    double output_interval;
+    int n_particles;
+} SimConfig;
+
+static SimConfig sim_config = {
+    .dt = 10.0,
+    .output_interval = 30.0,
+    .n_particles = 10,
+    .scale_dt = 1
+};
+
+void load_config(const char *filename)
+{
+    FILE *f = fopen(filename, "r");
+    if (!f)
+        return;
+
+    printf("Loading config: %s\n", filename);
+    char line[256];
+    while (fgets(line, sizeof(line), f))
+    {
+        char *p = line;
+        while (*p == ' ' || *p == '\t') p++;
+        if (*p == '#' || *p == '\0' || *p == '\n') continue;
+
+        char key[64] = {0}, val[64] = {0};
+        if (sscanf(line, " %63[^=] = %63s", key, val) != 2) continue;
+
+        /* trim trailing whitespace from key */
+        char *end = key + strlen(key) - 1;
+        while (end >= key && (*end == ' ' || *end == '\t')) *end-- = '\0';
+
+        if (strcmp(key, "dt") == 0)
+        {
+            sim_config.dt = atof(val);
+            printf("  dt = %g\n", sim_config.dt);
+        }
+	if (strcmp(key, "scale_dt") == 0)
+        {
+            sim_config.dt = atof(val);
+            printf("  scale_dt = %g\n", sim_config.dt);
+        }
+        else if (strcmp(key, "output_interval") == 0)
+        {
+            sim_config.output_interval = atof(val);
+            printf("  output_interval = %g\n", sim_config.output_interval);
+        }
+        else if (strcmp(key, "n_particles") == 0)
+        {
+            sim_config.n_particles = atoi(val);
+            printf("  n_particles = %d\n", sim_config.n_particles);
+        }
+        else
+        {
+            fprintf(stderr, "  warning: unknown config key '%s'\n", key);
+        }
+    }
+    fclose(f);
+}
 // typedef struct
 // {
 //     int *indices; // particle indices
@@ -476,6 +539,8 @@ int main(int argc, char *argv[])
         }
     }
 
+    load_config("sim.cfg");
+
     struct reb_simulation *sim = reb_simulation_create_from_file(setup_file, 0);
     printf("%f\n", sim->t);
     // Starting the REBOUND visualization server. This
@@ -484,7 +549,7 @@ int main(int argc, char *argv[])
     // reb_simulation_start_server(sim, 1234);
 
     // Setup constants
-    sim->dt = 10; // 10.;
+    sim->dt = sim_config.dt;
     /// 365.25 * 2. * M_PI; // 4days
     sim->integrator = REB_INTEGRATOR_WHFAST;
     //    sim->ri_whfast.coordinates   = REB_WHFAST_COORDINATES_DEMOCRATICHELIOCENTRIC;
@@ -553,7 +618,7 @@ int main(int argc, char *argv[])
                 {
                     double beta = BETA_LIST[betaindex];
                     // printf("Releasing beta=%.2e  N=%d\n", beta, n_per_beta);
-                    release_dust_at_comet(sim, target_index, beta, 10,
+                    release_dust_at_comet(sim, target_index, beta, sim_config.n_particles,
                                           EJECTION_V_SIGMA_MPS, 1);
                 }
         }
@@ -597,7 +662,7 @@ void heartbeat(struct reb_simulation *r)
     {
         reb_simulation_output_timing(r, INFINITY);
     }
-    if (fmod(r->t, OUTPUT_INTERVAL) < r->dt)
+    if (fmod(r->t, sim_config.output_interval) < r->dt)
     {
         // Guard against writing the same timestamp multiple times
         // Use a small epsilon for floating-point comparison

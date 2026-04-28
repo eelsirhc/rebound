@@ -1,6 +1,6 @@
 # This Makefile compiles the shared dynamic library librebound.so
 include src/Makefile.defs
-
+OPENMP=1
 librebound: 
 	$(MAKE) -C src 
 	@$(LINKORCOPYLIBREBOUNDMAIN)

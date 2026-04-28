@@ -9,7 +9,7 @@ ifneq ($(OS), Windows_NT)
 	RM=rm -f
 	LINKORCOPYLIBREBOUND=ln -s -f ../../src/$(LIBREBOUND) .
 	LINKORCOPYLIBREBOUNDMAIN=ln -s -f src/$(LIBREBOUND) .
-	CCPROBLEM=$(CC) -I../../src/ -Wl,-rpath,./ $(OPT) $(PREDEF) $< -L. -lrebound $(LIB) -o $(EXEREBOUND)
+	CCPROBLEM=$(CC) -I../../src/ -Wl,-rpath,./ $(OPT) $(PREDEF) $< -L. -lrebound -pthread $(LIB) -o $(EXEREBOUND)
 else
 ifeq ($(OPENGL), 1)
 $(warning OpenGL not supported on Windows. Setting OPENGL=0)
