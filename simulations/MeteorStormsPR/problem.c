@@ -25,6 +25,7 @@
 #define TWO_PI (2.0 * M_PI)
 
 static double BETA_LIST[] = {1e-4, 3e-4, 1e-3, 3e-3, 1e-2};
+//rough sizes: 1e-4 ~ 10cm, 3e-4 ~ 3cm, 1e-3 ~ 1cm, 3e-3 ~ 0.3cm, 1e-2 ~ 0.1cm (assuming density ~1000 kg/m³ and radiation pressure efficiency Q_pr ~ 1)
 static int N_BETA = 5;
 static double EJECTION_V_SIGMA_MPS = 200.0;
 
@@ -33,6 +34,7 @@ typedef struct
     double dt;
     double output_interval;
     int n_particles;
+    int scale_dt;
 } SimConfig;
 
 static SimConfig sim_config = {
@@ -68,7 +70,7 @@ void load_config(const char *filename)
             sim_config.dt = atof(val);
             printf("  dt = %g\n", sim_config.dt);
         }
-	if (strcmp(key, "scale_dt") == 0)
+	else if (strcmp(key, "scale_dt") == 0)
         {
             sim_config.dt = atof(val);
             printf("  scale_dt = %g\n", sim_config.dt);
@@ -597,7 +599,8 @@ int main(int argc, char *argv[])
     {
         double t = step * dt;
         reb_simulation_integrate(sim, t);
-
+	//if (r->t > min_output_time ) sim_config.output_interval = dt;
+	
         if ((step % 1 == 0) && (sim->N < MAX_PARTICLES - 1))
         {
             struct reb_particle target = sim->particles[target_index];
