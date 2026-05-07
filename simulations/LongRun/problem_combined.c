@@ -637,8 +637,10 @@ void heartbeat(struct reb_simulation *r)
     if (reb_simulation_output_check(r, 100.))
         reb_simulation_output_timing(r, INFINITY);
 
-    /* Check encounters every timestep */
-    check_and_record_encounters(r);
+    /* Check encounters every timestep, but only after year 1900 to avoid
+     * spurious perihelion-pulse hits during dust injection */
+    if (t_1900 < 0 || r->t >= t_1900)
+        check_and_record_encounters(r);
 
     /* Write orbital elements periodically */
     double interval = sim_config.output_interval;
