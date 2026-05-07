@@ -24,7 +24,7 @@
 
 static double BETA_LIST[]          = {1e-4, 3e-4, 1e-3, 3e-3, 1e-2};
 static int    N_BETA               = 5;
-static double EJECTION_V_SIGMA_MPS = 200.0;
+static double EJECTION_V_SIGMA_MPS = 50.0;
 
 /* Per-particle data stored in particle.ap for all dust */
 typedef struct {
