@@ -25,7 +25,7 @@
 #define TWO_PI (2.0 * M_PI)
 
 static double BETA_LIST[] = {1e-4, 3e-4, 1e-3, 3e-3, 1e-2};
-//rough sizes: 1e-4 ~ 10cm, 3e-4 ~ 3cm, 1e-3 ~ 1cm, 3e-3 ~ 0.3cm, 1e-2 ~ 0.1cm (assuming density ~1000 kg/m³ and radiation pressure efficiency Q_pr ~ 1)
+//sizes are ~ .3mm to .3 micron
 static int N_BETA = 5;
 static double EJECTION_V_SIGMA_MPS = 200.0;
 
