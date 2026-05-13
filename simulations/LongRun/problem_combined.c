@@ -48,8 +48,8 @@ static SimConfig sim_config = {
 
 /* ---- Orbital-elements HDF5 record ---- */
 typedef struct {
-    double time;
-    int    particle_id;
+    double   time;
+    uint32_t particle_id;  /* stable hash: 0-9 = Sun/planets/comet, >=10 = dust */
     double a, e, inc, Omega, omega, M;
     double x, y, z;
     double vx, vy, vz;
@@ -91,6 +91,9 @@ static int    comet_entered_inner   = 0;
 static double prev_r_comet          = -1.0;
 static int    r_was_increasing      = -1;
 static int    comet_past_perihelion = 0;
+static int      g_first_dust_idx    = -1;  /* index of first dust particle */
+static long     n_removed_total     = 0;
+static uint32_t g_next_dust_hash    = 10;  /* monotone counter; planets fixed at 0-9 */
 
 /* ---- Forward declarations ---- */
 void heartbeat(struct reb_simulation *r);
@@ -100,6 +103,7 @@ double vector_norm(double *v);
 void normalize(double *v);
 void release_dust_at_comet(struct reb_simulation *sim, int comet_idx, double beta,
                             int n_particles, double sigma_eject_ms, int add_ejection);
+void remove_escaped_dust(struct reb_simulation *sim);
 
 /* ---- Config ---- */
 void load_config(const char *filename)
@@ -155,7 +159,7 @@ void open_orbit_hdf5(const char *filename)
 {
     orbit_dtype_id = H5Tcreate(H5T_COMPOUND, sizeof(OrbElement));
     H5Tinsert(orbit_dtype_id, "time",        HOFFSET(OrbElement, time),        H5T_NATIVE_DOUBLE);
-    H5Tinsert(orbit_dtype_id, "particle_id", HOFFSET(OrbElement, particle_id), H5T_NATIVE_INT);
+    H5Tinsert(orbit_dtype_id, "particle_id", HOFFSET(OrbElement, particle_id), H5T_NATIVE_UINT);
     H5Tinsert(orbit_dtype_id, "a",           HOFFSET(OrbElement, a),           H5T_NATIVE_DOUBLE);
     H5Tinsert(orbit_dtype_id, "e",           HOFFSET(OrbElement, e),           H5T_NATIVE_DOUBLE);
     H5Tinsert(orbit_dtype_id, "inc",         HOFFSET(OrbElement, inc),         H5T_NATIVE_DOUBLE);
@@ -204,7 +208,7 @@ void output_orbital_elements(struct reb_simulation *r)
         struct reb_orbit o = reb_orbit_from_particle(r->G, r->particles[i], r->particles[0]);
         OrbElement *row    = &buf[n_written++];
         row->time          = t_jd_start + r->t;
-        row->particle_id   = i;
+        row->particle_id   = r->particles[i].hash;
         row->a             = o.a;
         row->e             = o.e;
         row->inc           = o.inc   * 180.0 / M_PI;
@@ -241,7 +245,7 @@ void write_final_orbital_elements(struct reb_simulation *r, const char *filename
     int N = r->N;
     hid_t dtype_id = H5Tcreate(H5T_COMPOUND, sizeof(OrbElement));
     H5Tinsert(dtype_id, "time",        HOFFSET(OrbElement, time),        H5T_NATIVE_DOUBLE);
-    H5Tinsert(dtype_id, "particle_id", HOFFSET(OrbElement, particle_id), H5T_NATIVE_INT);
+    H5Tinsert(dtype_id, "particle_id", HOFFSET(OrbElement, particle_id), H5T_NATIVE_UINT);
     H5Tinsert(dtype_id, "a",           HOFFSET(OrbElement, a),           H5T_NATIVE_DOUBLE);
     H5Tinsert(dtype_id, "e",           HOFFSET(OrbElement, e),           H5T_NATIVE_DOUBLE);
     H5Tinsert(dtype_id, "inc",         HOFFSET(OrbElement, inc),         H5T_NATIVE_DOUBLE);
@@ -263,7 +267,7 @@ void write_final_orbital_elements(struct reb_simulation *r, const char *filename
         int is_dust        = (r->particles[i].ap != NULL);
         struct reb_orbit o = reb_orbit_from_particle(r->G, r->particles[i], r->particles[0]);
         buf[i].time        = t_jd_start + r->t;
-        buf[i].particle_id = i;
+        buf[i].particle_id = r->particles[i].hash;
         buf[i].a           = o.a;
         buf[i].e           = o.e;
         buf[i].inc         = o.inc   * 180.0 / M_PI;
@@ -523,7 +527,32 @@ void release_dust_at_comet(struct reb_simulation *sim, int comet_idx, double bet
         dd->beta       = beta;
         dd->birth_time = t_jd_start + sim->t;
         dust.ap        = dd;
+        dust.hash      = g_next_dust_hash++;
         reb_simulation_add(sim, dust);
+    }
+}
+
+/* Remove dust particles with a < 0 (hyperbolic escape) or a > 100 AU.
+ * Iterates backwards so keepSorted=1 removals don't affect unchecked indices. */
+void remove_escaped_dust(struct reb_simulation *sim)
+{
+    if (g_first_dust_idx < 0) return;
+    int n_removed = 0;
+    for (int i = sim->N - 1; i >= g_first_dust_idx; i--) {
+        if (sim->particles[i].ap == NULL) continue;
+        struct reb_orbit o = reb_orbit_from_particle(sim->G, sim->particles[i], sim->particles[0]);
+        if (o.a < 0.0 || o.a > 100.0) {
+            free(sim->particles[i].ap);
+            sim->particles[i].ap = NULL;
+            reb_simulation_remove_particle(sim, i, 1);
+            n_removed++;
+        }
+    }
+    if (n_removed > 0) {
+        n_removed_total += n_removed;
+        printf("  Removed %d escaped dust particles (a<0 or a>100 AU)  "
+               "total removed: %ld  active dust: %d\n",
+               n_removed, n_removed_total, sim->N - g_first_dust_idx);
     }
 }
 
@@ -536,12 +565,17 @@ int main(int argc, char *argv[])
     char *setup_file = argv[1];
     int   num_days   = atoi(argv[2]);
     load_config("sim.cfg");
-    t_1900 = num_days - 365 * 100;
+    t_1900 = num_days - 365 * 125; // 2025!
 
     struct reb_simulation *sim = reb_simulation_create_from_file(setup_file, 0);
     if (!sim) { fprintf(stderr, "Error: could not load '%s'\n", setup_file); return 1; }
     printf("Loaded '%s': N=%d, sim->t=%.1f, t_1900=%.1f\n",
            setup_file, sim->N, sim->t, t_1900);
+
+    /* Assign stable hashes to Sun, planets, comet (0 .. N-1) */
+    for (int i = 0; i < sim->N; i++)
+        sim->particles[i].hash = (uint32_t)i;
+    g_next_dust_hash = (uint32_t)sim->N;
 
     sim->dt                          = sim_config.dt;
     sim->integrator                  = REB_INTEGRATOR_WHFAST;
@@ -557,6 +591,7 @@ int main(int argc, char *argv[])
     int    N_steps   = (int)(tmax / 10);
     double dt_step   = tmax / N_steps;
     int    target_index = sim->N - 1;
+    g_first_dust_idx    = target_index + 1;
 
     /* Derive encounter output path from setup_file */
     char base[512];
@@ -641,6 +676,13 @@ void heartbeat(struct reb_simulation *r)
      * spurious perihelion-pulse hits during dust injection */
     if (t_1900 < 0 || r->t >= t_1900)
         check_and_record_encounters(r);
+
+    /* Remove escaped dust annually (a < 0 or a > 100 AU) */
+    static double last_removal_time = -1.0;
+    if (last_removal_time < 0.0 || r->t - last_removal_time >= 365.0) {
+        remove_escaped_dust(r);
+        last_removal_time = r->t;
+    }
 
     /* Write orbital elements periodically */
     double interval = sim_config.output_interval;
