@@ -565,7 +565,7 @@ int main(int argc, char *argv[])
     char *setup_file = argv[1];
     int   num_days   = atoi(argv[2]);
     load_config("sim.cfg");
-    t_1900 = num_days - 365 * 100;
+    t_1900 = num_days - 365 * 125; // 2025!
 
     struct reb_simulation *sim = reb_simulation_create_from_file(setup_file, 0);
     if (!sim) { fprintf(stderr, "Error: could not load '%s'\n", setup_file); return 1; }
