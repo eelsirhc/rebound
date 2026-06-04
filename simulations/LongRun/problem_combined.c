@@ -37,13 +37,15 @@ typedef struct {
     double output_interval;
     int    n_particles;
     int    scale_dt;
+    int    write_orbital_elements;  /* 0 = skip orbital_elements.h5, 1 = write (default) */
 } SimConfig;
 
 static SimConfig sim_config = {
-    .dt              = 10.0,
-    .output_interval = 365.0,
-    .n_particles     = 10,
-    .scale_dt        = 1
+    .dt                     = 10.0,
+    .output_interval        = 365.0,
+    .n_particles            = 10,
+    .scale_dt               = 1,
+    .write_orbital_elements = 1
 };
 
 /* ---- Orbital-elements HDF5 record ---- */
@@ -120,10 +122,11 @@ void load_config(const char *filename)
         if (sscanf(line, " %63[^=] = %63s", key, val) != 2) continue;
         char *end = key + strlen(key) - 1;
         while (end >= key && (*end == ' ' || *end == '\t')) *end-- = '\0';
-        if      (strcmp(key, "dt")              == 0) { sim_config.dt              = atof(val); printf("  dt = %g\n",              sim_config.dt); }
-        else if (strcmp(key, "scale_dt")        == 0) { sim_config.scale_dt        = atoi(val); printf("  scale_dt = %d\n",        sim_config.scale_dt); }
-        else if (strcmp(key, "output_interval") == 0) { sim_config.output_interval = atof(val); printf("  output_interval = %g\n", sim_config.output_interval); }
-        else if (strcmp(key, "n_particles")     == 0) { sim_config.n_particles     = atoi(val); printf("  n_particles = %d\n",     sim_config.n_particles); }
+        if      (strcmp(key, "dt")                     == 0) { sim_config.dt                     = atof(val); printf("  dt = %g\n",                     sim_config.dt); }
+        else if (strcmp(key, "scale_dt")               == 0) { sim_config.scale_dt               = atoi(val); printf("  scale_dt = %d\n",               sim_config.scale_dt); }
+        else if (strcmp(key, "output_interval")        == 0) { sim_config.output_interval        = atof(val); printf("  output_interval = %g\n",        sim_config.output_interval); }
+        else if (strcmp(key, "n_particles")            == 0) { sim_config.n_particles            = atoi(val); printf("  n_particles = %d\n",            sim_config.n_particles); }
+        else if (strcmp(key, "write_orbital_elements") == 0) { sim_config.write_orbital_elements = atoi(val); printf("  write_orbital_elements = %d\n", sim_config.write_orbital_elements); }
         else fprintf(stderr, "  warning: unknown config key '%s'\n", key);
     }
     fclose(f);
@@ -188,6 +191,7 @@ void open_orbit_hdf5(const char *filename)
 
 void close_orbit_hdf5(void)
 {
+    if (orbit_file_id < 0) return;
     H5Dclose(orbit_dset_id);
     H5Sclose(orbit_space_id);
     H5Tclose(orbit_dtype_id);
@@ -604,7 +608,12 @@ int main(int argc, char *argv[])
     snprintf(enc_path, sizeof(enc_path), "%s_intersections.h5", base);
 
     reb_simulation_move_to_com(sim);
-    open_orbit_hdf5("orbital_elements.h5");
+    if (sim_config.write_orbital_elements) {
+        open_orbit_hdf5("orbital_elements.h5");
+        printf("Writing orbital elements to 'orbital_elements.h5'\n");
+    } else {
+        printf("Orbital elements time-series disabled (write_orbital_elements = 0)\n");
+    }
     open_encounter_hdf5(enc_path);
     printf("Writing intersections to '%s'\n", enc_path);
 
@@ -685,9 +694,11 @@ void heartbeat(struct reb_simulation *r)
     }
 
     /* Write orbital elements periodically */
-    double interval = sim_config.output_interval;
-    if (fmod(r->t, interval) < r->dt && fabs(r->t - last_output_time) > 1e-9) {
-        output_orbital_elements(r);
-        last_output_time = r->t;
+    if (sim_config.write_orbital_elements) {
+        double interval = sim_config.output_interval;
+        if (fmod(r->t, interval) < r->dt && fabs(r->t - last_output_time) > 1e-9) {
+            output_orbital_elements(r);
+            last_output_time = r->t;
+        }
     }
 }
