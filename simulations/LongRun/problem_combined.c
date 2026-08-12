@@ -419,7 +419,7 @@ void check_and_record_encounters(struct reb_simulation *r)
 }
 
 /* Save SimulationArchive + companion beta/birth_time file once dust emission stops. */
-void save_archive_snapshot(struct reb_simulation *sim, const char *setup_file)
+void save_archive_snapshot(struct reb_simulation *sim, const char *setup_file, const char *prefix)
 {
     char base[512];
     strncpy(base, setup_file, sizeof(base) - 1);
@@ -427,10 +427,10 @@ void save_archive_snapshot(struct reb_simulation *sim, const char *setup_file)
     size_t len = strlen(base);
     if (len > 4 && strcmp(base + len - 4, ".bin") == 0)
         base[len - 4] = '\0';
-
+    
     char archive_path[600], betas_path[600];
-    snprintf(archive_path, sizeof(archive_path), "%s_snapshot.bin",       base);
-    snprintf(betas_path,   sizeof(betas_path),   "%s_snapshot_betas.txt", base);
+    snprintf(archive_path, sizeof(archive_path), "%s_%s_snapshot.bin",       base, prefix);
+    snprintf(betas_path,   sizeof(betas_path),   "%s_%s_snapshot_betas.txt", base, prefix);
 
     reb_simulation_save_to_file(sim, archive_path);
     printf("SimulationArchive saved to '%s' (JD=%.1f, N=%d)\n",
@@ -617,17 +617,18 @@ int main(int argc, char *argv[])
     open_encounter_hdf5(enc_path);
     printf("Writing intersections to '%s'\n", enc_path);
 
-    int archive_saved = 0;
+    int emission_archive_saved = 0;
+    int end_archive_saved = 0;
 
     for (int step = 0; step <= N_steps; step++) {
         reb_simulation_integrate(sim, step * dt_step);
 
         /* Save archive once, immediately after dust emission stops */
-        if (!archive_saved && dust_emission_stopped) {
+        if (!emission_archive_saved && dust_emission_stopped) {
             printf("Saving archive snapshot at JD=%.1f (%d particles)...\n",
                    t_jd_start + sim->t, sim->N);
-            save_archive_snapshot(sim, setup_file);
-            archive_saved = 1;
+            save_archive_snapshot(sim, setup_file, "end_of_emission");
+            emission_archive_saved = 1;
         }
 
         {
@@ -669,6 +670,13 @@ int main(int argc, char *argv[])
     }
 
     write_final_orbital_elements(sim, "final_orbital_elements.h5");
+    /* Save archive once, immediately after dust emission stops */
+    if (!end_archive_saved) { 
+      printf("Saving archive snapshot at JD=%.1f (%d particles)...\n",
+	     t_jd_start + sim->t, sim->N);
+      save_archive_snapshot(sim, setup_file, "end_of_simulation");
+      end_archive_saved = 1;
+        }
     reb_simulation_free(sim);
     close_orbit_hdf5();
     close_encounter_hdf5();
@@ -683,7 +691,7 @@ void heartbeat(struct reb_simulation *r)
 
     /* Check encounters every timestep, but only after year 1900 to avoid
      * spurious perihelion-pulse hits during dust injection */
-    if (t_1900 < 0 || r->t >= t_1900)
+    //    if (t_1900 < 0 || r->t >= t_1900)
         check_and_record_encounters(r);
 
     /* Remove escaped dust annually (a < 0 or a > 100 AU) */

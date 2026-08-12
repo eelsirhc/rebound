@@ -1,0 +1,5 @@
+comet=$1
+for i in $comet/${comet}*.bin
+do
+  ./proc $i $comet
+done

@@ -1,0 +1,42 @@
+set -x
+
+name=$1
+comet=$2
+number=`basename $name .bin | awk -F_ '{print $2}'`
+binfilename=`basename $name`
+
+addon=`echo "365 * 25" | bc -q`
+rundays=`echo "${addon} + ${number}" | bc -q`
+
+if [ -d ./${comet}_output ] ; then
+   echo #do nothing, directory exists 
+elif [ -e ./${comet}_output ] ; then
+   echo "OUTPUT DIRECTORY IS A FILE, STOPPING"
+else
+	#make the directory here
+	mkdir ${comet}_output
+fi
+
+
+if [ ! -e ./${comet}_output/$binfilename ]
+then
+
+#COPY the run file here?
+cp $name ./
+
+echo `basename $name` $number $rundays
+./rebound_combined `basename $name` $rundays
+
+mv ${comet}_${number}_* ${comet}_output/
+
+if [ -e final_orbital_elements.h5 ] ; then
+   mv final_orbital_elements.h5 ${comet}_output/${number}_final_orbital_elements.h5
+fi
+
+if [ -e orbital_elements.h5 ] ; then
+   mv orbital_elements.h5 ${comet}_output/${number}_orbital_elements.h5
+fi
+
+mv `basename $name` ${comet}_output
+
+fi
